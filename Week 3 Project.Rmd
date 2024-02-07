@@ -1,0 +1,181 @@
+---
+title: "Week 3 Project"
+author: "Ben"
+date: "2024-01-28"
+output: html_document
+---
+## Load Libraries
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Loading the library
+library(tidyverse)
+```
+
+
+## Project Purpose
+##### This project is an assignment from the course "Data Science as a Field". This assignment is to complete all the steps in the data science process in a reproduceable manner. I will be testing to see if there is any coorelation between a victim's death from a shooting and their age, sex, and race.
+
+
+## Import the NYPD Dataset
+```{r Import the NYPD Dataset, echo = TRUE}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nypd_data <- read.csv(url_in)
+
+```
+
+## Initial Analyse and data cleaning
+#### Cleaning up the and removing Null Values so I can start my analysis
+```{r Initial Analyse and data cleaning, echo = TRUE}
+
+# Getting a broad view of the data and what format it is in
+summary(nypd_data)
+
+# Removing any data points with empty fields
+nypd_data <- nypd_data[complete.cases(nypd_data), ]
+
+# Removing data where the sex is Unknown
+nypd_data <- nypd_data[which(nypd_data$VIC_SEX != "U"),]
+
+# Removing Data where the age of the victim is Unknown AND 1022
+nypd_data <- nypd_data[which(nypd_data$VIC_AGE_GROUP != "UNKNOWN"),]
+nypd_data <- nypd_data[which(nypd_data$VIC_AGE_GROUP != "1022"),]
+
+```
+
+## Data Visuals
+##### The distribution of victims is about a bell curve with the mode being victim age group 25-44.There is a steep drop off in shooting victims older than 44. This is to be expected as there is probably a larger population of younger people in NYC. In terms of raw numbers we also see that the number of deaths go along with the higher number of shootings for each age group. Later on I will see if there is any percentage difference between death and age. 
+
+```{r Creating the visuals, echo = TRUE}
+
+# Creating a dataset for the victim's age and if they were murdered
+age_death <- nypd_data %>% 
+  filter(VIC_AGE_GROUP != 1022, VIC_AGE_GROUP != "UNKNOWN") %>% 
+  group_by(VIC_AGE_GROUP, STATISTICAL_MURDER_FLAG) %>% 
+  summarise(indicents = length(VIC_AGE_GROUP))
+
+# This gives the count of victims and count of their murders
+plot1 <- age_death %>% 
+  ggplot(aes(fill = STATISTICAL_MURDER_FLAG, x = VIC_AGE_GROUP, y = indicents)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = ifelse(indicents >= 126, paste0(sprintf("%.0f", indicents)), "")), 
+            position = position_stack(vjust=0.5), color = "white") +
+  xlab("Victim Age Group") +
+  ylab("Shootings") +
+  labs(fill = "Death of Victim")
+
+plot1
+
+
+```
+
+## Creating a heatmap to visual the distribution of shootings by victim age and sex
+##### Males are more likely to be victims of shooting. Both sexes have the largest counts of being victims in shootings for the 25-44 age group.
+
+```{r Heatmap for age and sex}
+
+# This gives us the number of shootings grouped by victim's age and sex.
+hm_age_sex <- nypd_data %>% 
+  group_by(VIC_AGE_GROUP, VIC_SEX) %>% 
+  summarise(count = length(VIC_AGE_GROUP))
+
+hm_age_sex %>% 
+  ggplot(aes(x = VIC_SEX, y = VIC_AGE_GROUP, fill = count)) +
+  geom_tile()+
+  geom_text(aes(label = count))+
+  xlab("Victim Gender") +
+  ylab("Victim Age Group") +
+  labs(fill = "Count of Shootings")
+
+
+```
+## Heatmap for Sex and Death
+##### Both sexes have about equal % of death from a shooting. We can claim that sex does not factor into if a victim will die from a shooting or not.
+
+```{r Heatmap for % of death from shooting by age group and sex}
+
+hm_sex_per <- nypd_data %>% 
+  group_by(VIC_SEX, VIC_AGE_GROUP, STATISTICAL_MURDER_FLAG) %>% 
+  summarise(count = length(STATISTICAL_MURDER_FLAG)) %>% 
+  group_by(VIC_AGE_GROUP, STATISTICAL_MURDER_FLAG) %>% 
+  mutate(per = round(count/sum(count),2))
+
+hm_sex_per$per
+
+hm_sex_per %>% 
+  ggplot(aes(fill = per, x = VIC_SEX, y = VIC_AGE_GROUP)) +
+  geom_tile() +
+  geom_text(aes(label = per))
+
+
+
+```
+
+```{r Viewing the percentage of death based on race}
+
+per_race <- nypd_data %>% 
+  filter(VIC_RACE != "UNKNOWN") %>% 
+  group_by(VIC_RACE, STATISTICAL_MURDER_FLAG) %>% 
+  summarise(countT = length(VIC_RACE)) %>% 
+  group_by(VIC_RACE) %>% 
+  mutate(per = paste0(round(100*countT/sum(countT),0),'%'))
+
+# This creates a stacked bar chart with the % of murder based on the age of the victim
+# As we can see the probability of a murder increases with the victim's age.
+options(repr.plot.width = 5, repr.plot.height = 5)
+
+plot3 <- per_race %>% 
+  ggplot(aes(fill = STATISTICAL_MURDER_FLAG, x = VIC_RACE, y = per)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = per), position = position_stack(vjust = 0.5), color = "white") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+plot3
+
+```
+
+## Percentage of Death by Age
+##### There is a clear positive coorelation between death and the victim's age. I feel that is is safe to assume that the older the victim the more likely death is. However, I will still run a regression to test the hypothesis. 
+``` {r Data Visual 2}
+# Creating a dataset to get the % of murders by the victim's age
+per_age <- nypd_data %>% 
+  filter(VIC_AGE_GROUP != 1022, VIC_AGE_GROUP != "UNKNOWN") %>% 
+  group_by(VIC_AGE_GROUP, STATISTICAL_MURDER_FLAG) %>% 
+  summarise(countT = length(VIC_AGE_GROUP)) %>% 
+  group_by(VIC_AGE_GROUP) %>% 
+  mutate(per = paste0(round(100*countT/sum(countT),0),'%'))
+
+# This creates a stacked bar chart with the % of murder based on the age of the victim
+# As we can see the probability of a murder increases with the victim's age.
+plot2 <- per_age %>% 
+  ggplot(aes(fill = STATISTICAL_MURDER_FLAG, x = VIC_AGE_GROUP, y = per)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = per), position = position_stack(vjust = 0.5), color = "white") +
+  xlab("Victim Age Group") +
+  ylab("Percentage of Survival") +
+  labs(fill = "Victim Survival")
+
+plot2
+
+```
+
+
+## Statistical Model
+##### Based on the results of the model sex and race do not have a significant factor in if a victim dies from a shooting. However, the victims age is positively coorelated with death from shooting.
+```{r Running a model}
+# Creating a column for the dummy variable "MURDER_FLAG" which is stating if the shooting resulted in a murder
+# This will be the what we will predict with our model
+nypd_data$MUDER_FLAG <- 0
+nypd_data$MUDER_FLAG[which(nypd_data$STATISTICAL_MURDER_FLAG == "true")] <- 1
+
+# Running a Poisson model to see if we can predict if a victim died based on their age group, sex, and race
+p_model <- glm(formula = MUDER_FLAG ~ VIC_AGE_GROUP + VIC_SEX + VIC_RACE, family = "poisson", data = nypd_data)
+
+# Summary of the model in action
+summary(p_model)
+
+```
+
+
+
+
